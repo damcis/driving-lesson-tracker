@@ -1,2 +1,2 @@
 # driving-lesson-tracker
-Task driving lessons
+Track driving lessons
