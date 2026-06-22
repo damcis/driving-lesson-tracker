@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="DL Tracker"/>
+  <meta name="theme-color" content="#e8a020"/>
+  <link rel="manifest" href="manifest.json"/>
+  <link rel="apple-touch-icon" href="icons/icon-192.png"/>
+  <title>Driving Lesson Tracker</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/pdfjs-dist@3.4.120/build/pdf.min.js"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    html,body,#root{height:100%}
+    body{font-family:Georgia,serif;-webkit-tap-highlight-color:transparent}
+    input,textarea,select,button{font-family:Georgia,serif}
+    ::-webkit-scrollbar{width:4px}
+    ::-webkit-scrollbar-thumb{border-radius:2px;background:#3a5a72}
+
+    /* Toggle switch */
+    .switch{position:relative;display:inline-block;width:46px;height:26px}
+    .switch input{opacity:0;width:0;height:0}
+    .slider{position:absolute;cursor:pointer;inset:0;border-radius:26px;transition:.3s}
+    .slider:before{position:absolute;content:"";height:20px;width:20px;left:3px;bottom:3px;border-radius:50%;transition:.3s;background:white}
+    input:checked+.slider{background:#5a8fa8}
+    input:not(:checked)+.slider{background:#e8a020}
+    input:checked+.slider:before{transform:translateX(20px)}
+
+    /* Modals */
+    .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:200;display:flex;align-items:flex-end;justify-content:center;backdrop-filter:blur(2px)}
+    .modal-sheet{width:100%;max-width:520px;max-height:82vh;border-radius:20px 20px 0 0;overflow:hidden;display:flex;flex-direction:column;animation:slideUp .25s ease-out}
+    @keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+    .modal-body{overflow-y:auto;flex:1;-webkit-overflow-scrolling:touch}
+    .checkbox-row{display:flex;align-items:center;gap:12px;padding:14px 18px;cursor:pointer;border-bottom:1px solid transparent;transition:background .15s}
+
+    /* Install banner */
+    .install-banner{position:fixed;bottom:0;left:0;right:0;z-index:300;padding:14px 16px;display:flex;align-items:center;gap:12px;animation:slideUp .3s ease-out;box-shadow:0 -4px 20px rgba(0,0,0,0.4)}
+    .install-banner .app-icon{width:48px;height:48px;border-radius:12px;background:linear-gradient(135deg,#e8a020,#c87d10);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0}
+
+    /* Ripple effect on buttons */
+    .ripple{position:relative;overflow:hidden}
+    .ripple::after{content:"";display:block;position:absolute;width:100%;height:100%;top:0;left:0;pointer-events:none;background-image:radial-gradient(circle,rgba(255,255,255,.2) 10%,transparent 10%);background-repeat:no-repeat;background-position:50%;transform:scale(10,10);opacity:0;transition:transform .4s,opacity .6s}
+    .ripple:active::after{transform:scale(0,0);opacity:.3;transition:0s}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useRef, useEffect } = React;
+
+if (window.pdfjsLib) {
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://unpkg.com/pdfjs-dist@3.4.120/build/pdf.worker.min.js';
+}
+
+// ── Practice reasons ──────────────────────────────────────────────────────────
+const PRACTICE_REASONS = {
+  "Car Familiarity":["Unfamiliar with basic controls","Struggles locating mirrors and gauges","Needs review of seat and mirror adjustment"],
+  "Hand Position":["Incorrect hand placement on wheel","Crossing hands when turning","One-handed driving","Gripping wheel too tightly"],
+  "Steering":["Overcorrecting steering","Jerky or abrupt inputs","Drifting without correcting","Poor wheel control at speed"],
+  "Braking Control":["Stopping too abruptly","Braking too late","Inconsistent brake pressure","Riding the brake pedal"],
+  "Braking Distance":["Not allowing enough stopping distance","Late reaction to hazards ahead","Misjudging speed and stopping time"],
+  "Accelerator Control":["Accelerating too quickly","Jerky acceleration","Riding the accelerator unnecessarily","Too slow to accelerate into traffic"],
+  "Speed Control":["Consistently driving too fast","Inconsistent speed on straightaways","Not adjusting speed for conditions","Driving too slowly and impeding traffic"],
+  "Speed During Turns":["Entering turns too fast","Not slowing before the turn","Accelerating too early mid-turn"],
+  "Use of Turn Signals":["Forgetting to use turn signals","Signaling too late","Not canceling signal after turning","Using wrong signal direction"],
+  "Use of Mirrors - General":["Not checking mirrors regularly","Failing to check before braking or turning","Poor mirror adjustment"],
+  "Shoulder Checks":["Not performing shoulder checks","Relying only on mirrors","Incomplete head movement"],
+  "Blind Spots":["Not checking blind spots before lane changes","Unaware of blind spot locations","Over-relying on mirrors only"],
+  "Lane Position":["Drives too close to the right side","Drifts into adjacent lane","Inconsistent center lane positioning","Hugging the center line"],
+  "Lane Changes":["Not checking mirrors and blind spots first","Changing lanes too abruptly","Cutting off other vehicles","Drifting rather than deliberate change"],
+  "Right & Left Turns":["Taking turns too wide","Cutting corners on left turns","Not checking for pedestrians","Turning too sharply"],
+  "Right & Left Turns in Double Lanes":["Moving into wrong lane during turn","Not tracking correct lane through turn","Crossing lane markings mid-turn"],
+  "Approach a Corner":["Approaching the corner too fast","Not positioning correctly before the turn","Braking too late for the corner"],
+  "Intersections":["Not scanning intersection before entering","Misjudging gaps in crossing traffic","Hesitating at busy intersections"],
+  "Scanning Intersections":["Not looking both ways before proceeding","Missing pedestrians on crosswalks","Focusing only straight ahead"],
+  "Stop Signs":["Rolling through stops","Stopping past the stop line","Not looking before proceeding","Stopping too far back from the line"],
+  "Traffic Lights (Arrows)":["Misreading arrow signals","Proceeding on a stale green","Unsure when to go on arrow vs. green ball"],
+  "4-Way Stops":["Confused about right-of-way order","Going out of turn","Not making eye contact with other drivers"],
+  "Right on Red":["Not stopping fully before turning","Not checking for pedestrians","Turning where a no-turn-on-red sign is posted"],
+  "Right of Way":["Yielding when not necessary and disrupting traffic","Not yielding when legally required","Misjudging gaps in oncoming traffic"],
+  "Following Distance":["Following too closely","Not increasing distance at higher speeds","Tailgating in stop-and-go traffic"],
+  "Stopping Distance":["Stopping too close to vehicle ahead","Not leaving enough gap at red lights","Last-minute braking when traffic stops"],
+  "Passing":["Passing in an unsafe area","Not enough clear distance ahead","Returning to lane too soon after passing"],
+  "Merging":["Not matching highway speed on ramp","Merging too slowly","Not yielding to highway traffic","Cutting off merging traffic"],
+  "Freeways":["Uncomfortable at highway speeds","Poor lane discipline at speed","Not maintaining safe following distance","Hesitant entering or exiting"],
+  "Traffic Circles":["Not yielding to traffic already in the circle","Wrong lane selection entering the circle","Stopping unnecessarily inside the roundabout"],
+  "Curved Roads":["Not adjusting speed for the curve","Drifting out of lane on curves","Over-braking in the middle of the curve"],
+  "Backing in a Straight Line":["Oversteering while reversing","Not checking surroundings before and during reverse","Moving too fast in reverse"],
+  "U-Turns":["Not checking for traffic before turning","U-turn too wide or too tight","Attempting U-turn in wrong location"],
+  "3-Point Turn & 2-Point Turns":["Poor space and distance judgment","Not checking surroundings at each step","Inconsistent execution"],
+  "Parallel Parking":["Misjudging available space","Not close enough to the curb","Multiple attempts needed"],
+  "Perpendicular Parking":["Parking at an angle","Too far from or over the line","Inconsistent entry angle"],
+  "Road Signs - Knowledge":["Misreading or ignoring signs","Unfamiliar with regulatory sign meanings","Not responding appropriately to warning signs"],
+  "Attitude":["Frustration affecting concentration","Overconfidence leading to risk-taking","Not receptive to instruction"],
+  "Comfort Level":["Visible anxiety behind the wheel","Hesitant in moderate traffic","Tense body posture affecting control"],
+  "General Observation / Commentary Driving":["Not scanning road far enough ahead","Missing developing hazards","Poor overall situational awareness"],
+};
+
+// ── localStorage helpers ──────────────────────────────────────────────────────
+const STORAGE_KEY = 'frisco_custom_reasons';
+const loadCustomReasons = () => {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)||'{}'); }
+  catch { return {}; }
+};
+const saveCustomReasons = (data) => {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
+  catch(e) { console.warn('Could not save reasons',e); }
+};
+
+// ── Static data ───────────────────────────────────────────────────────────────
+const DEFAULT_SKILLS = [
+  "Car Familiarity","Hand Position","Steering","Braking Control",
+  "Braking Distance","Accelerator Control","Speed Control","Speed During Turns",
+  "Use of Turn Signals","Use of Mirrors - General","Shoulder Checks","Blind Spots",
+  "Lane Position","Lane Changes","Right & Left Turns","Right & Left Turns in Double Lanes",
+  "Approach a Corner","Intersections","Scanning Intersections","Stop Signs",
+  "Traffic Lights (Arrows)","4-Way Stops","Right on Red","Right of Way",
+  "Following Distance","Stopping Distance","Passing","Merging","Freeways",
+  "Traffic Circles","Curved Roads","Backing in a Straight Line","U-Turns",
+  "3-Point Turn & 2-Point Turns","Parallel Parking","Perpendicular Parking",
+  "Road Signs - Knowledge","Attitude","Comfort Level",
+  "General Observation / Commentary Driving",
+];
+
+const KUDOS_OPTIONS = [
+  {label:"Great attitude today",                  sentence:"a great attitude"},
+  {label:"Excellent improvement",                 sentence:"excellent improvement"},
+  {label:"Very focused throughout the lesson",    sentence:"strong focus throughout the lesson"},
+  {label:"Good confidence behind the wheel",      sentence:"good confidence behind the wheel"},
+  {label:"Great situational awareness",           sentence:"great situational awareness"},
+  {label:"Smooth and controlled driving",         sentence:"smooth and controlled driving"},
+  {label:"Quick learner",                         sentence:"a quick learning ability"},
+  {label:"Outstanding effort",                    sentence:"outstanding effort"},
+  {label:"Very coachable — takes feedback well",  sentence:"a very coachable attitude and takes feedback well"},
+  {label:"Remarkable progress this session",      sentence:"remarkable progress this session"},
+  {label:"Stayed calm under pressure",            sentence:"calm composure under pressure"},
+  {label:"Excellent defensive driving instincts", sentence:"excellent defensive driving instincts"},
+];
+
+const AREAS_DRIVEN = [
+  {label:"Parking Lot",  phrase:"a parking lot"},
+  {label:"Neighborhood", phrase:"neighborhood streets"},
+  {label:"Main Roads",   phrase:"main roads"},
+  {label:"Highway",      phrase:"the highway"},
+];
+
+// ── Essay templates ───────────────────────────────────────────────────────────
+const GOOD_FIRST=[
+  (n,l)=>`${n} did really well today — ${l} were all looking solid.`,
+  (n,l)=>`Nice work on ${l}, ${n} — that's coming along great.`,
+  (n,l)=>`${l} were a real strength today, ${n}. Keep that up.`,
+  (n,l)=>`${n} handled ${l} smoothly — nice job.`,
+  (n,l)=>`Good lesson for ${l} — ${n} looked really comfortable with these.`,
+  (n,l)=>`${l} were excellent today, ${n}. That's exactly what we want to see.`,
+];
+const GOOD_CONT=[
+  (n,l)=>`Also doing well: ${l}.`,
+  (n,l)=>`On top of that, ${l} were good too.`,
+  (n,l)=>`${l} were solid as well.`,
+  (n,l)=>`Add to that ${l} — all looking good.`,
+  (n,l)=>`${n} was also on point with ${l}.`,
+];
+const PRACTICE_FIRST=[
+  (n,l)=>`${l} could use a bit more practice — totally normal at this stage, ${n}.`,
+  (n,l)=>`Let's keep working on ${l} next lesson.`,
+  (n,l)=>`${n} should spend a little extra time on ${l} going forward.`,
+  (n,l)=>`A bit more practice with ${l} and ${n} will be set.`,
+  (n,l)=>`Need to tighten up ${l} a little — nothing major, just keep at it.`,
+  (n,l)=>`${l} were a little off today but improved as the lesson went on — keep practicing those.`,
+];
+const PRACTICE_CONT=[
+  (n,l)=>`Also worth practicing: ${l}.`,
+  (n,l)=>`On top of that, keep an eye on ${l}.`,
+  (n,l)=>`${l} could use some attention too.`,
+  (n,l)=>`Add ${l} to the practice list as well.`,
+  (n,l)=>`Let's also work on ${l} next time.`,
+];
+const CLOSERS_STRONG=["Great lesson today!","Nice work — keep it up!","You've got this!","Really solid session overall.","Great job today!"];
+const CLOSERS_MIXED=["Good lesson overall — just keep working on those few things and you'll be set.","Solid effort today, just a couple things to tighten up next time.","Nice progress — let's keep building on this next lesson.","Overall a good session — just keep practicing those areas above."];
+const CLOSERS_PRACTICE=["Nothing to worry about — this is all part of the process. Keep at it!","Everyone needs work on something — you'll get there with practice.","Keep practicing these and they'll click before you know it."];
+
+// ── Themes ────────────────────────────────────────────────────────────────────
+const DARK={bg:"#0f1923",card:"#1a2e40",cardDark:"#152535",border:"#253d52",borderKudos:"#3a5a2a",borderArea:"#2a3a5a",text:"#dce8f0",textMuted:"#a0bdd0",blue:"#5a8fa8",amber:"#e8a020",amberDark:"#c87d10",green:"#2ea86e",greenAlt:"#27ae60",greenLight:"#4ec98a",kudos:"#7ecf5a",kudosBg:"#2a5a1a",area:"#7ab0e0",areaBg:"#1a2a4a",addBtn:"#1e4a8a",inputBorder:"#2a4a62",rowBorder:"#1e3347",modalBg:"#1a2e40",modalHeader:"#152535"};
+const LIGHT={bg:"#eef2f7",card:"#ffffff",cardDark:"#dde8f2",border:"#b8cfe0",borderKudos:"#7ab87a",borderArea:"#7aaad0",text:"#1a2e40",textMuted:"#3a5a72",blue:"#2a5a7a",amber:"#b86a00",amberDark:"#9a5800",green:"#1a7a50",greenAlt:"#158a48",greenLight:"#1a6a44",kudos:"#2a8a1a",kudosBg:"#c8f0b8",area:"#1a5a9a",areaBg:"#c0d8f8",addBtn:"#1a4a8a",inputBorder:"#90b8d0",rowBorder:"#c8dcea",modalBg:"#ffffff",modalHeader:"#dde8f2"};
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const initialSkills = () =>
+  DEFAULT_SKILLS.map((name,i)=>({id:i,name,status:null,reason:'',isCustom:false}));
+
+const toNaturalList = (items) => {
+  if (!items.length) return "";
+  if (items.length===1) return items[0];
+  if (items.length===2) return `${items[0]} and ${items[1]}`;
+  return items.slice(0,-1).join(", ")+", and "+items[items.length-1];
+};
+
+const buildSkillParagraph = (items, firstName, type) => {
+  if (!items.length) return "";
+  const chunks=[];
+  for (let i=0;i<items.length;i+=4) chunks.push(items.slice(i,i+4));
+  const FT=type==="good"?GOOD_FIRST:PRACTICE_FIRST;
+  const CT=type==="good"?GOOD_CONT:PRACTICE_CONT;
+  const seed=items.length%FT.length;
+  const nameOf = s => {
+    const base = s.name.toLowerCase();
+    return s.reason ? `${base} (${s.reason.toLowerCase()})` : base;
+  };
+  const names = c => toNaturalList(c.map(nameOf));
+  const sentences=[FT[seed](firstName,names(chunks[0]))];
+  for (let i=1;i<chunks.length;i++)
+    sentences.push(CT[(seed+i)%CT.length](firstName,names(chunks[i])));
+  return sentences.join(" ");
+};
+
+const buildKudosSentence = (selectedKudos, kudosNote, firstName) => {
+  const sentences=selectedKudos.map(k=>KUDOS_OPTIONS.find(o=>o.label===k)?.sentence).filter(Boolean);
+  const note=kudosNote.trim();
+  if (!sentences.length&&!note) return null;
+  if (sentences.length===0) return `${firstName}, ${note.replace(/\.+$/,"")}!`;
+  if (sentences.length===1&&!note) return `${firstName}, ${selectedKudos[0]}!`;
+  if (sentences.length>=2&&!note) return `${firstName} showed ${toNaturalList(sentences)} throughout today's lesson.`;
+  if (sentences.length===1&&note) return `${firstName}, ${selectedKudos[0]}! ${note.replace(/\.+$/,"")}.`;
+  return `${firstName} showed ${toNaturalList(sentences)} throughout today's lesson. ${note.replace(/\.+$/,"")}.`;
+};
+
+// ── PDF parsing (unchanged from v6) ──────────────────────────────────────────
+const MONTH_MAP={january:1,february:2,march:3,april:4,may:5,june:6,july:7,august:8,september:9,october:10,november:11,december:12};
+const tryParseDate=(str)=>{let m;m=str.match(/^\s*(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s*$/);if(m){let y=parseInt(m[3]);if(y<100)y+=2000;const d=new Date(y,parseInt(m[1])-1,parseInt(m[2]));if(!isNaN(d)&&d.getFullYear()>=2020)return d;}m=str.match(/(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})[,\s]+(\d{4})/i);if(m){const d=new Date(parseInt(m[3]),MONTH_MAP[m[1].toLowerCase()]-1,parseInt(m[2]));if(!isNaN(d))return d;}return null;};
+const parseTime12=(str)=>{const m=str.match(/\b(\d{1,2}):(\d{2})\s*(AM|PM)\b/i);if(!m)return null;let h=parseInt(m[1]);const min=parseInt(m[2]);if(m[3].toUpperCase()==="PM"&&h<12)h+=12;if(m[3].toUpperCase()==="AM"&&h===12)h=0;return{h,min};};
+const extractPDFItems=async(arrayBuffer)=>{const pdf=await window.pdfjsLib.getDocument({data:arrayBuffer}).promise;const allItems=[];for(let p=1;p<=pdf.numPages;p++){const page=await pdf.getPage(p);const vp=page.getViewport({scale:1.0});const content=await page.getTextContent();for(const item of content.items){const str=item.str.trim();if(!str)continue;allItems.push({str,x:item.transform[4],y:vp.height-item.transform[5]});}}return allItems;};
+const parsePDFSchedule=(allItems)=>{const timeLabels=allItems.filter(it=>/^\d{1,2}:\d{2}\s*(AM|PM)$/i.test(it.str)).sort((a,b)=>a.y-b.y);const getTimeAtY=(y)=>{if(!timeLabels.length)return null;let best=timeLabels[0],minD=Math.abs(y-best.y);for(const t of timeLabels){const d=Math.abs(y-t.y);if(d<minD){minD=d;best=t;}}return parseTime12(best.str);};const s1Items=allItems.filter(it=>/^S1\s*:/i.test(it.str)).sort((a,b)=>a.x!==b.x?a.x-b.x:a.y-b.y);const events=[];for(let si=0;si<s1Items.length;si++){const entry=s1Items[si];const nextS1=s1Items.find(it=>it!==entry&&Math.abs(it.x-entry.x)<60&&it.y>entry.y+10);const yMax=nextS1?Math.min(nextS1.y-5,entry.y+200):entry.y+200;const block=allItems.filter(it=>Math.abs(it.x-entry.x)<60&&it.y>=entry.y-3&&it.y<=yMax).sort((a,b)=>a.y-b.y);let studentName=entry.str.replace(/^S1\s*:\s*/i,"").trim();if(studentName.endsWith(",")){const cont=block.find(it=>it.y>entry.y+2&&it.y<entry.y+50&&!/^S[T]?1|^Type:|^Notes:|^Inst:/i.test(it.str)&&!tryParseDate(it.str));if(cont)studentName+=" "+cont.str;}let lessonType=null;for(const it of block){if(/^ST1\s*:/i.test(it.str)){const lt=it.str.replace(/^ST1\s*:\s*/i,"").trim();if(lt){lessonType=lt;break;}}}let lessonDate=null;for(const it of block){const d=tryParseDate(it.str);if(d){lessonDate=d;break;}}const time=getTimeAtY(entry.y);if(time&&lessonDate){events.push({summary:`${studentName} — ${lessonType||"Driving Lesson"}`,description:`Student: ${studentName}\\nLesson: ${lessonType||"Driving Lesson"}`,date:lessonDate,h:time.h,min:time.min,duration:lessonType&&/7-7/.test(lessonType)?120:60});}}return events;};
+const fmtICSDate=(date,h,min)=>{const y=date.getFullYear(),mo=String(date.getMonth()+1).padStart(2,"0"),d=String(date.getDate()).padStart(2,"0");return`${y}${mo}${d}T${String(h).padStart(2,"0")}${String(min).padStart(2,"0")}00`;};
+const generateICS=(events)=>{const stamp=new Date().toISOString().replace(/[-:.]/g,"").slice(0,15)+"Z";const lines=["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Frisco Driving School//Schedule//EN","CALSCALE:GREGORIAN","METHOD:PUBLISH","X-WR-CALNAME:Frisco Driving School","X-WR-TIMEZONE:America/Chicago"];for(const ev of events){const endH=ev.h+Math.floor((ev.min+ev.duration)/60),endMin=(ev.min+ev.duration)%60;lines.push("BEGIN:VEVENT",`UID:${stamp}-${Math.random().toString(36).substr(2,9)}@frisco`,`DTSTAMP:${stamp}`,`DTSTART;TZID=America/Chicago:${fmtICSDate(ev.date,ev.h,ev.min)}`,`DTEND;TZID=America/Chicago:${fmtICSDate(ev.date,endH,endMin)}`,`SUMMARY:${ev.summary}`,`DESCRIPTION:${ev.description}`,"END:VEVENT");}lines.push("END:VCALENDAR");return lines.join("\r\n");};
+const downloadICS=(content,filename)=>{const blob=new Blob([content],{type:"text/calendar;charset=utf-8"}),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
+
+// ── Install Banner Component ──────────────────────────────────────────────────
+function InstallBanner({ onInstall, onDismiss, t, dark }) {
+  return (
+    <div className="install-banner" style={{background:dark?"#1a2e40":"#1a3a5a",border:`1px solid ${t.amber}`}}>
+      <div className="app-icon">🚗</div>
+      <div style={{flex:1}}>
+        <div style={{color:"#ffffff",fontWeight:"bold",fontSize:14,marginBottom:2}}>Add to Home Screen</div>
+        <div style={{color:"rgba(255,255,255,0.7)",fontSize:12}}>Install for offline use & quick access</div>
+      </div>
+      <div style={{display:"flex",gap:8,flexShrink:0}}>
+        <button onClick={onDismiss} style={{background:"transparent",border:"1px solid rgba(255,255,255,0.3)",borderRadius:8,color:"rgba(255,255,255,0.6)",padding:"7px 12px",fontSize:13,cursor:"pointer"}}>Later</button>
+        <button onClick={onInstall} className="ripple" style={{background:`linear-gradient(135deg,${t.amber},${t.amberDark})`,border:"none",borderRadius:8,color:dark?"#0f1923":"#fff",padding:"7px 14px",fontSize:13,fontWeight:"bold",cursor:"pointer"}}>Install</button>
+      </div>
+    </div>
+  );
+}
+
+// ── Main App ──────────────────────────────────────────────────────────────────
+function DrivingTracker() {
+  const [dark,          setDark]          = useState(false);
+  const [studentName,   setStudentName]   = useState("");
+  const [skills,        setSkills]        = useState(initialSkills());
+  const [customInput,   setCustomInput]   = useState("");
+  const [selectedKudos, setSelectedKudos] = useState([]);
+  const [kudosOpen,     setKudosOpen]     = useState(false);
+  const [kudosNote,     setKudosNote]     = useState("");
+  const [selectedAreas, setSelectedAreas] = useState([]);
+  const [notes,         setNotes]         = useState("");
+  const [copied,        setCopied]        = useState(false);
+  const [nextId,        setNextId]        = useState(DEFAULT_SKILLS.length);
+  const [customReasons, setCustomReasons] = useState(loadCustomReasons);
+  const [addReasonFor,  setAddReasonFor]  = useState(null);
+  const [newReasonText, setNewReasonText] = useState("");
+  const [pdfStatus,     setPdfStatus]     = useState("idle");
+  const [pdfEvents,     setPdfEvents]     = useState([]);
+  const [pdfError,      setPdfError]      = useState("");
+  const [pdfFilename,   setPdfFilename]   = useState("");
+  // PWA install
+  const [installPrompt, setInstallPrompt] = useState(null);
+  const [showBanner,    setShowBanner]    = useState(false);
+  const pdfInputRef = useRef();
+
+  const t = dark ? DARK : LIGHT;
+
+  // ── PWA install prompt ────────────────────────────────────────────────────
+  useEffect(() => {
+    // Register service worker
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js').catch(err =>
+        console.warn('SW registration failed:', err)
+      );
+    }
+
+    const handler = (e) => {
+      e.preventDefault();
+      setInstallPrompt(e);
+      // Only show banner if not already installed and not dismissed recently
+      const dismissed = localStorage.getItem('pwa_banner_dismissed');
+      const lastDismiss = dismissed ? parseInt(dismissed) : 0;
+      const daysSince = (Date.now() - lastDismiss) / (1000 * 60 * 60 * 24);
+      if (daysSince > 3) {
+        setTimeout(() => setShowBanner(true), 2000);
+      }
+    };
+
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  const handleInstall = async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setInstallPrompt(null);
+      setShowBanner(false);
+    }
+  };
+
+  const dismissBanner = () => {
+    setShowBanner(false);
+    localStorage.setItem('pwa_banner_dismissed', Date.now().toString());
+  };
+
+  // ── App logic ─────────────────────────────────────────────────────────────
+  const getReasons = (skillName) => [
+    ...(PRACTICE_REASONS[skillName]||[]),
+    ...(customReasons[skillName]||[]),
+  ];
+
+  const toggleKudos = opt => setSelectedKudos(p=>p.includes(opt)?p.filter(k=>k!==opt):[...p,opt]);
+  const toggleArea  = label => setSelectedAreas(p=>p.includes(label)?p.filter(a=>a!==label):[...p,label]);
+
+  const toggle = (id,val) =>
+    setSkills(skills.map(s=>s.id===id?{...s,status:s.status===val?null:val,reason:''}:s));
+
+  const updateReason = (id,reason) =>
+    setSkills(skills.map(s=>s.id===id?{...s,reason}:s));
+
+  const addSkill = () => {
+    const name=customInput.trim();if(!name)return;
+    setSkills([...skills,{id:nextId,name,status:null,reason:'',isCustom:true}]);
+    setNextId(n=>n+1);setCustomInput("");
+  };
+  const removeSkill = id => setSkills(skills.filter(s=>s.id!==id));
+
+  const openAddReason = (skillId,skillName) => {
+    setAddReasonFor({skillId,skillName});
+    setNewReasonText("");
+  };
+
+  const saveNewReason = () => {
+    const reason=newReasonText.trim();
+    if(!reason||!addReasonFor)return;
+    const updated={...customReasons,[addReasonFor.skillName]:[...(customReasons[addReasonFor.skillName]||[]),reason]};
+    setCustomReasons(updated);
+    saveCustomReasons(updated);
+    updateReason(addReasonFor.skillId,reason);
+    setAddReasonFor(null);
+    setNewReasonText("");
+  };
+
+  // ── PDF ──────────────────────────────────────────────────────────────────
+  const handlePDFSelect = async (e) => {
+    const file=e.target.files?.[0];if(!file)return;
+    setPdfFilename(file.name);setPdfStatus("parsing");setPdfEvents([]);setPdfError("");
+    try {
+      if(!window.pdfjsLib)throw new Error("PDF library not loaded — check internet connection.");
+      const ab=await file.arrayBuffer();
+      const items=await extractPDFItems(ab);
+      const events=parsePDFSchedule(items);
+      if(!events.length){setPdfError("No schedule entries found. Confirm the PDF has S1: student blocks.");setPdfStatus("error");}
+      else{setPdfEvents(events);setPdfStatus("done");}
+    } catch(err){setPdfError(err.message||"Failed to read PDF.");setPdfStatus("error");}
+    e.target.value="";
+  };
+
+  const handleDownloadICS = () =>
+    downloadICS(generateICS(pdfEvents),pdfFilename.replace(/\.pdf$/i,"")+".ics");
+
+  // ── Output builder ────────────────────────────────────────────────────────
+  const buildOutput = () => {
+    const fullName=studentName.trim()||"The student";
+    const firstName=fullName.split(" ")[0];
+    const good=skills.filter(s=>s.status==="good");
+    const practice=skills.filter(s=>s.status==="practice");
+    const kudosText=buildKudosSentence(selectedKudos,kudosNote,firstName);
+    const areaPhrases=AREAS_DRIVEN.filter(a=>selectedAreas.includes(a.label)).map(a=>a.phrase);
+    const areasSentence=areaPhrases.length?`Today's lesson covered ${toNaturalList(areaPhrases)}.`:"";
+    let opening="";
+    if(kudosText&&areasSentence)opening=kudosText+" "+areasSentence;
+    else if(kudosText)opening=kudosText;
+    else if(areasSentence)opening=`${firstName}'s lesson today covered ${toNaturalList(areaPhrases)}.`;
+    let out="";
+    if(opening)out+=opening+"\n\n";
+    const gp=buildSkillParagraph(good,firstName,"good");if(gp)out+=gp+"\n\n";
+    const pp=buildSkillParagraph(practice,firstName,"practice");if(pp)out+=pp+"\n\n";
+    if(!opening&&!gp&&!pp)out+="No skills were rated during this session.\n\n";
+    if(gp||pp){
+      const seed=(good.length+practice.length*2)%4;
+      let closer;
+      if(good.length>0&&practice.length===0) closer=CLOSERS_STRONG[seed%CLOSERS_STRONG.length];
+      else if(good.length>0&&practice.length>0) closer=CLOSERS_MIXED[seed%CLOSERS_MIXED.length];
+      else closer=CLOSERS_PRACTICE[seed%CLOSERS_PRACTICE.length];
+      out+=closer+"\n\n";
+    }
+    if(notes.trim())out+=notes.trim().replace(/\.+$/,"")+".";
+    return out.trim();
+  };
+
+  const copyToClipboard = async () => {
+    const text=buildOutput();
+    try{await navigator.clipboard.writeText(text);}
+    catch{const el=document.createElement("textarea");el.value=text;document.body.appendChild(el);el.select();document.execCommand("copy");document.body.removeChild(el);}
+    setCopied(true);setTimeout(()=>setCopied(false),2500);
+  };
+
+  const reset = () => {
+    setStudentName("");setSkills(initialSkills());setNotes("");
+    setSelectedKudos([]);setKudosNote("");setSelectedAreas([]);
+    setCopied(false);setNextId(DEFAULT_SKILLS.length);setCustomInput("");
+  };
+
+  const goodCount=skills.filter(s=>s.status==="good").length;
+  const practiceCount=skills.filter(s=>s.status==="practice").length;
+  const total=skills.length;
+
+  // ── Style helpers ─────────────────────────────────────────────────────────
+  const fieldStyle={width:"100%",background:t.bg,border:`1px solid ${t.inputBorder}`,borderRadius:8,padding:"10px 12px",color:t.text,fontSize:15,outline:"none",boxSizing:"border-box"};
+  const card=(border,children,mb=12)=>(
+    <div style={{background:t.card,border:`1px solid ${border}`,borderRadius:12,padding:14,marginBottom:mb}}>{children}</div>
+  );
+  const sLabel=(txt,color)=>(<div style={{color,fontSize:10,letterSpacing:2,marginBottom:8}}>{txt}</div>);
+  const badge=(n,color,bg)=>(<span style={{background:bg,color,borderRadius:10,padding:"1px 8px",fontSize:10,marginLeft:8}}>{n} selected</span>);
+  const pill=(label,active,ac,abg,onClick)=>(
+    <button key={label} onClick={onClick} style={{padding:"7px 13px",borderRadius:20,cursor:"pointer",border:`1.5px solid ${active?ac:t.border}`,background:active?abg:t.bg,color:active?ac:t.textMuted,fontSize:13,transition:"all .15s"}}>
+      {active&&"✓ "}{label}
+    </button>
+  );
+  const toggleBtn=(active,color,onClick,darkText=false)=>(
+    <button onClick={onClick} style={{width:34,height:34,borderRadius:6,cursor:"pointer",padding:0,border:`2px solid ${active?color:t.inputBorder}`,background:active?color:t.bg,color:darkText&&active?(dark?"#0f1923":"#fff"):(dark?"#fff":"#1a2e40"),fontSize:14,fontWeight:"bold",display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s",flexShrink:0}}>
+      {active&&"✓"}
+    </button>
+  );
+
+  // ── Kudos modal ───────────────────────────────────────────────────────────
+  const kudosModal=kudosOpen&&(
+    <div className="modal-overlay" onClick={()=>setKudosOpen(false)}>
+      <div className="modal-sheet" style={{background:t.modalBg}} onClick={e=>e.stopPropagation()}>
+        <div style={{background:t.modalHeader,padding:"16px 18px",borderBottom:`1px solid ${t.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <span style={{color:t.kudos,fontWeight:"bold",letterSpacing:1,fontSize:14}}>★ SELECT KUDOS</span>
+          <span style={{color:t.textMuted,fontSize:12}}>{selectedKudos.length} selected</span>
+        </div>
+        <div className="modal-body" style={{background:t.modalBg}}>
+          {KUDOS_OPTIONS.map(({label})=>{
+            const active=selectedKudos.includes(label);
+            return(
+              <div key={label} className="checkbox-row" style={{borderBottomColor:t.rowBorder,background:active?(dark?"rgba(126,207,90,0.08)":"rgba(42,138,26,0.06)"):"transparent"}} onClick={()=>toggleKudos(label)}>
+                <div style={{width:22,height:22,borderRadius:4,flexShrink:0,border:`2px solid ${active?t.kudos:t.inputBorder}`,background:active?t.kudos:t.bg,display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>
+                  {active&&<span style={{color:dark?"#0f1923":"#fff",fontSize:13,fontWeight:"bold"}}>✓</span>}
+                </div>
+                <span style={{color:active?t.kudos:t.text,fontSize:14,flex:1}}>{label}</span>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{padding:"12px 16px",background:t.modalHeader,borderTop:`1px solid ${t.border}`}}>
+          <button onClick={()=>setKudosOpen(false)} className="ripple" style={{width:"100%",padding:"13px",borderRadius:10,border:"none",background:`linear-gradient(135deg,${t.kudos},${dark?"#5aaf3a":"#1a7a10"})`,color:"#fff",fontSize:15,fontWeight:"bold",cursor:"pointer"}}>✓ Done</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── Add Reason modal ──────────────────────────────────────────────────────
+  const addReasonModal=addReasonFor&&(
+    <div className="modal-overlay" onClick={()=>setAddReasonFor(null)}>
+      <div className="modal-sheet" style={{background:t.modalBg,maxHeight:"50vh"}} onClick={e=>e.stopPropagation()}>
+        <div style={{background:t.modalHeader,padding:"16px 18px",borderBottom:`1px solid ${t.border}`}}>
+          <div style={{color:t.amber,fontWeight:"bold",fontSize:14,marginBottom:2}}>Add Practice Reason</div>
+          <div style={{color:t.textMuted,fontSize:12}}>{addReasonFor.skillName}</div>
+        </div>
+        <div style={{padding:16,background:t.modalBg}}>
+          <input
+            type="text"
+            value={newReasonText}
+            onChange={e=>setNewReasonText(e.target.value)}
+            onKeyDown={e=>e.key==="Enter"&&saveNewReason()}
+            placeholder="Describe why practice is needed..."
+            autoFocus
+            style={{...fieldStyle,fontSize:14,marginBottom:10}}
+          />
+          <p style={{color:t.textMuted,fontSize:11,lineHeight:1.5}}>
+            💾 Saved permanently on this device for <em>{addReasonFor.skillName}</em>.
+          </p>
+        </div>
+        <div style={{padding:"12px 16px",background:t.modalHeader,borderTop:`1px solid ${t.border}`,display:"flex",gap:8}}>
+          <button onClick={saveNewReason} className="ripple" style={{flex:1,padding:"13px",borderRadius:10,border:"none",background:`linear-gradient(135deg,${t.amber},${t.amberDark})`,color:dark?"#0f1923":"#fff",fontSize:14,fontWeight:"bold",cursor:"pointer"}}>
+            + Save Permanently
+          </button>
+          <button onClick={()=>setAddReasonFor(null)} style={{padding:"13px 16px",borderRadius:10,border:`2px solid ${t.border}`,background:"transparent",color:t.textMuted,fontSize:13,cursor:"pointer"}}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── Render ────────────────────────────────────────────────────────────────
+  return(
+    <div style={{minHeight:"100vh",background:t.bg,paddingBottom:showBanner?100:40,transition:"background .3s"}}>
+
+      {/* ── Header ── */}
+      <div style={{background:dark?"linear-gradient(135deg,#1a2e40,#0f1923)":"linear-gradient(135deg,#c8dcea,#eef2f7)",borderBottom:`3px solid ${t.amber}`,padding:"48px 16px 14px",position:"sticky",top:0,zIndex:10}}>
+        <div style={{maxWidth:520,margin:"0 auto"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:3}}>
+            <span style={{fontSize:22}}>🚗</span>
+            <h1 style={{color:t.amber,fontSize:19,fontWeight:"bold",margin:0,letterSpacing:1,flex:1}}>DRIVING LESSON TRACKER</h1>
+            <div style={{display:"flex",alignItems:"center",gap:6}}>
+              <span style={{fontSize:14}}>☀️</span>
+              <label className="switch"><input type="checkbox" checked={dark} onChange={()=>setDark(d=>!d)}/><span className="slider"/></label>
+              <span style={{fontSize:14}}>🌙</span>
+            </div>
+          </div>
+          <p style={{color:t.blue,fontSize:11,margin:0,letterSpacing:2}}>FRISCO DRIVING SCHOOL</p>
+          <div style={{marginTop:10,display:"flex",gap:8,alignItems:"center"}}>
+            <div style={{flex:1,height:6,background:dark?"#1e3045":"#c8d8e8",borderRadius:3,overflow:"hidden"}}>
+              <div style={{height:"100%",borderRadius:3,transition:"width .3s",width:`${total?((goodCount+practiceCount)/total)*100:0}%`,background:`linear-gradient(90deg,${t.green},${t.amber})`}}/>
+            </div>
+            <span style={{color:t.blue,fontSize:11,whiteSpace:"nowrap"}}>{goodCount+practiceCount}/{total} rated</span>
+          </div>
+        </div>
+      </div>
+
+      <div style={{maxWidth:520,margin:"0 auto",padding:"16px 12px 0"}}>
+
+        {/* Student Name */}
+        {card(t.border,<>{sLabel("STUDENT NAME",t.blue)}<input type="text" value={studentName} onChange={e=>setStudentName(e.target.value)} placeholder="Enter student name..." style={fieldStyle}/></>)}
+
+        {/* Kudos */}
+        {card(t.borderKudos,<>
+          <div style={{display:"flex",alignItems:"center",marginBottom:10}}>
+            <span style={{color:t.kudos,fontSize:10,letterSpacing:2}}>★ KUDOS</span>
+            {selectedKudos.length>0&&badge(selectedKudos.length,t.kudos,t.kudosBg)}
+          </div>
+          <button onClick={()=>setKudosOpen(true)} className="ripple" style={{width:"100%",padding:"11px 14px",borderRadius:8,cursor:"pointer",border:`1px solid ${t.borderKudos}`,background:t.bg,color:selectedKudos.length?t.kudos:t.textMuted,fontSize:14,display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+            <span>{selectedKudos.length===0&&"Select kudos..."}{selectedKudos.length===1&&selectedKudos[0]}{selectedKudos.length>1&&`${selectedKudos.length} kudos selected`}</span>
+            <span style={{color:t.textMuted,fontSize:12}}>▼</span>
+          </button>
+          <textarea value={kudosNote} onChange={e=>setKudosNote(e.target.value)} placeholder="Add a personal kudos note..." rows={2} style={{...fieldStyle,resize:"vertical",border:`1px solid ${t.borderKudos}`,lineHeight:1.5}}/>
+        </>)}
+
+        {/* Areas Driven */}
+        {card(t.borderArea,<>
+          <div style={{display:"flex",alignItems:"center",marginBottom:10}}>
+            <span style={{color:t.area,fontSize:10,letterSpacing:2}}>📍 AREAS DRIVEN</span>
+            {selectedAreas.length>0&&badge(selectedAreas.length,t.area,t.areaBg)}
+          </div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+            {AREAS_DRIVEN.map(({label})=>pill(label,selectedAreas.includes(label),t.area,dark?"rgba(122,176,224,0.15)":"rgba(26,90,154,0.12)",()=>toggleArea(label)))}
+          </div>
+        </>)}
+
+        {/* Skills Table */}
+        <div style={{background:t.card,border:`1px solid ${t.border}`,borderRadius:12,overflow:"hidden",marginBottom:12}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 44px 44px 26px",gap:6,alignItems:"center",padding:"10px 14px",background:t.cardDark,borderBottom:`1px solid ${t.border}`}}>
+            <span style={{color:t.blue,fontSize:10,letterSpacing:2}}>SKILL</span>
+            <span style={{color:t.green,fontSize:9,letterSpacing:1,textAlign:"center"}}>GOOD</span>
+            <span style={{color:t.amber,fontSize:9,letterSpacing:1,textAlign:"center"}}>PRAC.</span>
+            <span/>
+          </div>
+
+          {skills.map((skill,idx)=>{
+            const isGood=skill.status==="good",isPractice=skill.status==="practice";
+            const isLast=idx===skills.length-1;
+            const reasons=getReasons(skill.name);
+            return(
+              <div key={skill.id}>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 44px 44px 26px",gap:6,alignItems:"center",padding:"11px 14px",borderBottom:(!isPractice&&!isLast)?`1px solid ${t.rowBorder}`:"none",background:isGood?(dark?"rgba(46,168,110,0.08)":"rgba(26,122,80,0.07)"):isPractice?(dark?"rgba(232,160,32,0.08)":"rgba(184,106,0,0.07)"):"transparent",transition:"background .2s"}}>
+                  <span style={{color:isGood?t.greenLight:isPractice?t.amber:t.textMuted,fontSize:14}}>{skill.name}</span>
+                  <div style={{display:"flex",justifyContent:"center"}}>{toggleBtn(isGood,t.green,()=>toggle(skill.id,"good"))}</div>
+                  <div style={{display:"flex",justifyContent:"center"}}>{toggleBtn(isPractice,t.amber,()=>toggle(skill.id,"practice"),true)}</div>
+                  <div style={{display:"flex",justifyContent:"center"}}>
+                    {skill.isCustom&&(<button onClick={()=>removeSkill(skill.id)} style={{background:"none",border:"none",color:t.textMuted,fontSize:20,cursor:"pointer",padding:0,lineHeight:1}}>×</button>)}
+                  </div>
+                </div>
+                {isPractice&&(
+                  <div style={{display:"flex",gap:8,alignItems:"center",padding:"4px 14px 10px 22px",borderBottom:!isLast?`1px solid ${t.rowBorder}`:"none",background:dark?"rgba(232,160,32,0.05)":"rgba(184,106,0,0.04)"}}>
+                    <span style={{color:t.amber,fontSize:11,flexShrink:0,opacity:.8}}>Why:</span>
+                    <select
+                      value={skill.reason||""}
+                      onChange={e=>updateReason(skill.id,e.target.value)}
+                      style={{flex:1,background:t.bg,border:`1px solid ${t.amber}`,borderRadius:6,padding:"6px 8px",color:skill.reason?t.text:t.textMuted,fontSize:13,outline:"none",cursor:"pointer"}}
+                    >
+                      <option value="">Select reason...</option>
+                      {reasons.map(r=>(<option key={r} value={r}>{r}</option>))}
+                    </select>
+                    <button
+                      onClick={()=>openAddReason(skill.id,skill.name)}
+                      title="Add new reason"
+                      style={{background:"none",border:`1.5px solid ${t.amber}`,borderRadius:6,color:t.amber,width:28,height:28,fontSize:16,fontWeight:"bold",cursor:"pointer",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center"}}
+                    >+</button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          <div style={{display:"flex",gap:8,padding:"10px 14px",background:t.cardDark,borderTop:`1px solid ${t.border}`}}>
+            <input type="text" value={customInput} onChange={e=>setCustomInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addSkill()} placeholder="Add custom skill..." style={{...fieldStyle,fontSize:13,padding:"8px 12px"}}/>
+            <button onClick={addSkill} className="ripple" style={{background:t.addBtn,border:"none",borderRadius:8,color:"#dce8f0",padding:"8px 14px",fontSize:13,fontWeight:"bold",cursor:"pointer",whiteSpace:"nowrap"}}>+ Add</button>
+          </div>
+        </div>
+
+        {/* Stats summary */}
+        <div style={{display:"flex",gap:8,marginBottom:12}}>
+          {[{count:goodCount,label:"GOOD",color:t.green,base:dark?"46,168,110":"26,122,80"},{count:practiceCount,label:"PRACTICE",color:t.amber,base:dark?"232,160,32":"184,106,0"},{count:total-goodCount-practiceCount,label:"SKIPPED",color:t.blue,base:dark?"90,143,168":"42,90,122"}].map(({count,label,color,base})=>(
+            <div key={label} style={{flex:1,background:`rgba(${base},0.12)`,border:`1px solid rgba(${base},0.3)`,borderRadius:8,padding:"8px 12px",textAlign:"center"}}>
+              <div style={{color,fontSize:22,fontWeight:"bold"}}>{count}</div>
+              <div style={{color,fontSize:10,letterSpacing:1,opacity:.8}}>{label}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Notes */}
+        {card(t.border,<>{sLabel("NOTES",t.blue)}<textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Add any additional observations about this lesson..." rows={4} style={{...fieldStyle,resize:"vertical",lineHeight:1.5}}/></>)}
+
+        {/* PDF Import */}
+        {card(t.border,<>
+          {sLabel("📅 IMPORT SCHEDULE PDF",t.blue)}
+          <p style={{color:t.textMuted,fontSize:13,marginBottom:12,lineHeight:1.6}}>Select a weekly schedule PDF to generate a <strong style={{color:t.text}}>.ics</strong> file for Google Calendar.</p>
+          <input ref={pdfInputRef} type="file" accept=".pdf,application/pdf" onChange={handlePDFSelect} style={{display:"none"}}/>
+          <button onClick={()=>pdfInputRef.current?.click()} className="ripple" style={{width:"100%",padding:"12px",borderRadius:8,cursor:"pointer",border:`1.5px dashed ${t.inputBorder}`,background:t.bg,color:t.blue,fontSize:14,fontWeight:"bold",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+            <span style={{fontSize:18}}>📂</span>{pdfStatus==="parsing"?"Reading PDF...":"Choose Schedule PDF"}
+          </button>
+          {pdfStatus==="parsing"&&<div style={{marginTop:12,padding:"12px 14px",borderRadius:8,background:dark?"rgba(90,143,168,0.1)":"rgba(42,90,122,0.08)",color:t.blue,fontSize:13,textAlign:"center"}}>⏳ Parsing schedule entries...</div>}
+          {pdfStatus==="error"&&<div style={{marginTop:12,padding:"12px 14px",borderRadius:8,background:dark?"rgba(200,60,60,0.1)":"rgba(180,40,40,0.08)",color:dark?"#e07070":"#b02020",fontSize:13}}>⚠️ {pdfError}</div>}
+          {pdfStatus==="done"&&pdfEvents.length>0&&(
+            <div style={{marginTop:12}}>
+              <div style={{padding:"12px 14px",borderRadius:8,marginBottom:10,background:dark?"rgba(46,168,110,0.1)":"rgba(26,122,80,0.08)",color:t.green,fontSize:13}}>
+                ✓ Found <strong>{pdfEvents.length} lesson{pdfEvents.length!==1?"s":""}</strong> in <em>{pdfFilename}</em>
+              </div>
+              <div style={{maxHeight:180,overflowY:"auto",borderRadius:8,border:`1px solid ${t.border}`,marginBottom:10}}>
+                {pdfEvents.map((ev,i)=>(
+                  <div key={i} style={{padding:"8px 12px",fontSize:12,borderBottom:i<pdfEvents.length-1?`1px solid ${t.rowBorder}`:"none",background:i%2===0?t.bg:t.card,color:t.textMuted}}>
+                    <span style={{color:t.text,fontWeight:"bold"}}>{ev.date.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}</span>
+                    {" · "}{String(ev.h).padStart(2,"0")}:{String(ev.min).padStart(2,"0")}{" — "}{ev.summary}
+                  </div>
+                ))}
+              </div>
+              <button onClick={handleDownloadICS} className="ripple" style={{width:"100%",padding:"13px",borderRadius:8,border:"none",cursor:"pointer",background:`linear-gradient(135deg,${t.blue},${dark?"#3a6a9a":"#1a4a7a"})`,color:"#fff",fontSize:14,fontWeight:"bold",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+                <span style={{fontSize:16}}>⬇️</span>Download .ics — Import to Google Calendar
+              </button>
+              <p style={{color:t.textMuted,fontSize:11,marginTop:8,textAlign:"center",lineHeight:1.5}}>Tap the downloaded .ics file and choose Google Calendar to import.</p>
+            </div>
+          )}
+        </>,16)}
+
+        {/* Action Buttons */}
+        <div style={{display:"flex",gap:10}}>
+          <button onClick={copyToClipboard} className="ripple" style={{flex:1,padding:15,borderRadius:12,border:"none",cursor:"pointer",background:copied?`linear-gradient(135deg,${t.green},${t.greenAlt})`:`linear-gradient(135deg,${t.amber},${t.amberDark})`,color:copied?"#fff":(dark?"#0f1923":"#fff"),fontSize:15,fontWeight:"bold",letterSpacing:.5,transition:"all .25s"}}>
+            {copied?"✓ Copied to Clipboard!":"📋 Copy to Clipboard"}
+          </button>
+          <button onClick={reset} style={{padding:"15px 18px",borderRadius:12,cursor:"pointer",border:`2px solid ${t.border}`,background:"transparent",color:t.blue,fontSize:13,fontWeight:"bold"}}>Reset</button>
+        </div>
+
+      </div>
+
+      {/* Modals */}
+      {kudosModal}
+      {addReasonModal}
+
+      {/* PWA Install Banner */}
+      {showBanner&&(
+        <InstallBanner
+          onInstall={handleInstall}
+          onDismiss={dismissBanner}
+          t={t}
+          dark={dark}
+        />
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<DrivingTracker/>);
+</script>
+</body>
+</html>
