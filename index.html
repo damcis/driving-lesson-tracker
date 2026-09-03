@@ -116,17 +116,17 @@ const saveCustomReasons = (data) => {
 
 // ── Static data ───────────────────────────────────────────────────────────────
 const DEFAULT_SKILLS = [
-  "Car Familiarity","Hand Position","Steering","Braking Control",
-  "Braking Distance","Accelerator Control","Speed Control","Speed During Turns",
-  "Use of Turn Signals","Use of Mirrors - General","Shoulder Checks","Blind Spots",
-  "Lane Position","Lane Changes","Right & Left Turns","Right & Left Turns in Double Lanes",
-  "Approach a Corner","Intersections","Scanning Intersections","Stop Signs",
-  "Traffic Lights (Arrows)","4-Way Stops","Right on Red","Right of Way",
-  "Following Distance","Stopping Distance","Passing","Merging","Freeways",
-  "Traffic Circles","Curved Roads","Backing in a Straight Line","U-Turns",
-  "3-Point Turn & 2-Point Turns","Parallel Parking","Perpendicular Parking",
-  "Road Signs - Knowledge","Attitude","Comfort Level",
-  "General Observation / Commentary Driving",
+  "3-Point Turn & 2-Point Turns","4-Way Stops","Accelerator Control","Approach a Corner",
+  "Attitude","Backing in a Straight Line","Blind Spots","Braking Control",
+  "Braking Distance","Car Familiarity","Comfort Level","Curved Roads",
+  "Following Distance","Freeways","General Observation / Commentary Driving","Hand Position",
+  "Intersections","Lane Changes","Lane Position","Merging",
+  "Parallel Parking","Passing","Perpendicular Parking","Practice Test",
+  "Right & Left Turns","Right & Left Turns in Double Lanes","Right of Way","Right on Red",
+  "Road Signs - Knowledge","Scanning Intersections","Shoulder Checks","Speed Control",
+  "Speed During Turns","Steering","Stop Signs","Stopping Distance",
+  "Traffic Circles","Traffic Lights (Arrows)","U-Turns","Use of Mirrors - General",
+  "Use of Turn Signals",
 ];
 
 const KUDOS_OPTIONS = [
@@ -142,6 +142,11 @@ const KUDOS_OPTIONS = [
   {label:"Remarkable progress this session",      sentence:"remarkable progress this session"},
   {label:"Stayed calm under pressure",            sentence:"calm composure under pressure"},
   {label:"Excellent defensive driving instincts", sentence:"excellent defensive driving instincts"},
+  {label:"Great communication and questions",     sentence:"great communication and thoughtful questions"},
+  {label:"Confident trying new maneuvers",        sentence:"confidence trying new maneuvers"},
+  {label:"Consistent improvement lesson to lesson", sentence:"consistent improvement lesson to lesson"},
+  {label:"Very patient and hardworking",          sentence:"patience and hard work throughout"},
+  {label:"Great independent decision-making",     sentence:"great independent decision-making"},
 ];
 
 const AREAS_DRIVEN = [
@@ -152,6 +157,7 @@ const AREAS_DRIVEN = [
   {label:"Highway",         phrase:"the highway"},
   {label:"CR68",            phrase:"narrow road, lane position test"},
   {label:"Traffic Circles", phrase:"traffic circles, Fields Pkwy"},
+  {label:"Practice Test",   phrase:"a full practice driving test"},
 ];
 
 // ── Essay templates ───────────────────────────────────────────────────────────
@@ -240,7 +246,7 @@ const parseTime12=(str)=>{const m=str.match(/\b(\d{1,2}):(\d{2})\s*(AM|PM)\b/i);
 const extractPDFItems=async(arrayBuffer)=>{const pdf=await window.pdfjsLib.getDocument({data:arrayBuffer}).promise;const allItems=[];for(let p=1;p<=pdf.numPages;p++){const page=await pdf.getPage(p);const vp=page.getViewport({scale:1.0});const content=await page.getTextContent();for(const item of content.items){const str=item.str.trim();if(!str)continue;allItems.push({str,x:item.transform[4],y:vp.height-item.transform[5]});}}return allItems;};
 const parsePDFSchedule=(allItems)=>{const timeLabels=allItems.filter(it=>/^\d{1,2}:\d{2}\s*(AM|PM)$/i.test(it.str)).sort((a,b)=>a.y-b.y);const getTimeAtY=(y)=>{if(!timeLabels.length)return null;let best=timeLabels[0],minD=Math.abs(y-best.y);for(const t of timeLabels){const d=Math.abs(y-t.y);if(d<minD){minD=d;best=t;}}return parseTime12(best.str);};const s1Items=allItems.filter(it=>/^S1\s*:/i.test(it.str)).sort((a,b)=>a.x!==b.x?a.x-b.x:a.y-b.y);const events=[];for(let si=0;si<s1Items.length;si++){const entry=s1Items[si];const nextS1=s1Items.find(it=>it!==entry&&Math.abs(it.x-entry.x)<60&&it.y>entry.y+10);const yMax=nextS1?Math.min(nextS1.y-5,entry.y+200):entry.y+200;const block=allItems.filter(it=>Math.abs(it.x-entry.x)<60&&it.y>=entry.y-3&&it.y<=yMax).sort((a,b)=>a.y-b.y);let studentName=entry.str.replace(/^S1\s*:\s*/i,"").trim();if(studentName.endsWith(",")){const cont=block.find(it=>it.y>entry.y+2&&it.y<entry.y+50&&!/^S[T]?1|^Type:|^Notes:|^Inst:/i.test(it.str)&&!tryParseDate(it.str));if(cont)studentName+=" "+cont.str;}let lessonType=null;for(const it of block){if(/^ST1\s*:/i.test(it.str)){const lt=it.str.replace(/^ST1\s*:\s*/i,"").trim();if(lt){lessonType=lt;break;}}}let lessonDate=null;for(const it of block){const d=tryParseDate(it.str);if(d){lessonDate=d;break;}}const time=getTimeAtY(entry.y);if(time&&lessonDate){events.push({summary:`${studentName} — ${lessonType||"Driving Lesson"}`,description:`Student: ${studentName}\\nLesson: ${lessonType||"Driving Lesson"}`,date:lessonDate,h:time.h,min:time.min,duration:lessonType&&/7-7/.test(lessonType)?120:60});}}return events;};
 const fmtICSDate=(date,h,min)=>{const y=date.getFullYear(),mo=String(date.getMonth()+1).padStart(2,"0"),d=String(date.getDate()).padStart(2,"0");return`${y}${mo}${d}T${String(h).padStart(2,"0")}${String(min).padStart(2,"0")}00`;};
-const generateICS=(events)=>{const stamp=new Date().toISOString().replace(/[-:.]/g,"").slice(0,15)+"Z";const lines=["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Frisco Driving School//Schedule//EN","CALSCALE:GREGORIAN","METHOD:PUBLISH","X-WR-CALNAME:Frisco Driving School","X-WR-TIMEZONE:America/Chicago"];for(const ev of events){const endH=ev.h+Math.floor((ev.min+ev.duration)/60),endMin=(ev.min+ev.duration)%60;lines.push("BEGIN:VEVENT",`UID:${stamp}-${Math.random().toString(36).substr(2,9)}@frisco`,`DTSTAMP:${stamp}`,`DTSTART;TZID=America/Chicago:${fmtICSDate(ev.date,ev.h,ev.min)}`,`DTEND;TZID=America/Chicago:${fmtICSDate(ev.date,endH,endMin)}`,`SUMMARY:${ev.summary}`,`DESCRIPTION:${ev.description}`,"END:VEVENT");}lines.push("END:VCALENDAR");return lines.join("\r\n");};
+const generateICS=(events)=>{const stamp=new Date().toISOString().replace(/[-:.]/g,"").slice(0,15)+"Z";const lines=["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Frisco Driving School//Schedule//EN","CALSCALE:GREGORIAN","METHOD:PUBLISH","X-WR-CALNAME:Frisco Driving School","X-WR-TIMEZONE:America/Chicago"];for(const ev of events){const endH=ev.h+Math.floor((ev.min+ev.duration)/60),endMin=(ev.min+ev.duration)%60;lines.push("BEGIN:VEVENT",`UID:${stamp}-${Math.random().toString(36).substr(2,9)}@frisco`,`DTSTAMP:${stamp}`,`DTSTART;TZID=America/Chicago:${fmtICSDate(ev.date,ev.h,ev.min)}`,`DTEND;TZID=America/Chicago:${fmtICSDate(ev.date,endH,endMin)}`,`SUMMARY:${ev.summary}`,`DESCRIPTION:${ev.description}`,"ATTENDEE;CN=A Gift For All Ages:mailto:agiftforallages@gmail.com","END:VEVENT");}lines.push("END:VCALENDAR");return lines.join("\r\n");};
 const downloadICS=(content,filename)=>{const blob=new Blob([content],{type:"text/calendar;charset=utf-8"}),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
 
 // ── Install Banner Component ──────────────────────────────────────────────────
