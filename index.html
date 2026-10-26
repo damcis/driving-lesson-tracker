@@ -116,17 +116,29 @@ const saveCustomReasons = (data) => {
 
 // ── Static data ───────────────────────────────────────────────────────────────
 const DEFAULT_SKILLS = [
-  "3-Point Turn & 2-Point Turns","4-Way Stops","Accelerator Control","Approach a Corner",
-  "Attitude","Backing in a Straight Line","Blind Spots","Braking Control",
-  "Braking Distance","Car Familiarity","Comfort Level","Curved Roads",
-  "Following Distance","Freeways","General Observation / Commentary Driving","Hand Position",
-  "Intersections","Lane Changes","Lane Position","Merging",
-  "Parallel Parking","Passing","Perpendicular Parking","Practice Test",
-  "Right & Left Turns","Right & Left Turns in Double Lanes","Right of Way","Right on Red",
-  "Road Signs - Knowledge","Scanning Intersections","Shoulder Checks","Speed Control",
-  "Speed During Turns","Steering","Stop Signs","Stopping Distance",
-  "Traffic Circles","Traffic Lights (Arrows)","U-Turns","Use of Mirrors - General",
-  "Use of Turn Signals",
+  // Getting started
+  "Car Familiarity","Hand Position","Attitude","Comfort Level",
+  // Vehicle control
+  "Steering","Accelerator Control","Braking Control","Braking Distance",
+  "Speed Control","Speed During Turns",
+  // Awareness & observation
+  "Use of Mirrors - General","Shoulder Checks","Blind Spots",
+  "Scanning Intersections","General Observation / Commentary Driving",
+  // Signaling & lane skills
+  "Use of Turn Signals","Lane Position","Lane Changes",
+  // Turns & intersections
+  "Approach a Corner","Right & Left Turns","Right & Left Turns in Double Lanes",
+  "Intersections","Stop Signs","4-Way Stops","Traffic Lights (Arrows)",
+  "Right on Red","Right of Way","Traffic Circles",
+  // Distance & following
+  "Following Distance","Stopping Distance",
+  // Road types & complex driving
+  "Passing","Merging","Freeways","Curved Roads",
+  // Parking & maneuvers
+  "Backing in a Straight Line","U-Turns","3-Point Turn & 2-Point Turns",
+  "Parallel Parking","Perpendicular Parking",
+  // Knowledge & assessment
+  "Road Signs - Knowledge","Practice Test",
 ];
 
 const KUDOS_OPTIONS = [
@@ -420,7 +432,10 @@ function DrivingTracker() {
   };
 
   const copyToClipboard = async () => {
-    const text=buildOutput();
+    const essay=buildOutput();
+    const needsPractice=skills.filter(s=>s.status==="practice").map(s=>s.name);
+    const data={studentName:studentName.trim(),needsPractice};
+    const text=`${essay}\n\n###SKILLS_DATA###\n${JSON.stringify(data)}`;
     try{await navigator.clipboard.writeText(text);}
     catch{const el=document.createElement("textarea");el.value=text;document.body.appendChild(el);el.select();document.execCommand("copy");document.body.removeChild(el);}
     setCopied(true);setTimeout(()=>setCopied(false),2500);
